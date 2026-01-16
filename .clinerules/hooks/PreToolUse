@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# PreToolUse hook for Conventional Commits validation
+# 
+# This hook validates git commit messages against the Conventional Commits specification.
+# It intercepts git commit commands and ensures commit messages follow the format:
+#   <type>[optional scope]: <description>
+#
+# Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+# Optional scope: Must be in parentheses: feat(parser):
+# Breaking changes: Use ! after type/scope or BREAKING CHANGE: footer
+#
+# Examples of valid commits:
+#   feat: add new feature
+#   fix(parser): resolve null pointer exception
+#   feat!: breaking change with !
+#   docs: update README with installation steps
+#
+# The hook will:
+# 1. Block invalid commit messages with detailed error messages
+# 2. Provide context reminders for editor-based commits (no -m flag)
+# 3. Allow valid conventional commits to proceed
+
+# Read JSON input from stdin
+input=$(cat)
+
+# Extract tool name and parameters
+tool_name=$(echo "$input" | jq -r '.preToolUse.toolName // empty')
+
+# Only process execute_command tool
+if [[ "$tool_name" != "execute_command" ]]; then
+    echo '{"cancel": false}'
+    exit 0
+fi
+
+# Extract the command being executed
+command=$(echo "$input" | jq -r '.preToolUse.parameters.command // empty')
+
+# Check if this is a git commit command
+if [[ ! "$command" =~ ^git\ commit ]]; then
+    echo '{"cancel": false}'
+    exit 0
+fi
+
+# Function to extract commit message from git command
+# Supports: git commit -m "message", git commit --message="message", git commit --message "message"
+extract_commit_message() {
+    local cmd="$1"
+    local message=""
+    
+    # Try to extract message from -m flag with double quotes
+    if [[ "$cmd" =~ -m[[:space:]]+\"([^\"]+)\" ]]; then
+        message="${BASH_REMATCH[1]}"
+    # Try to extract from -m flag with single quotes  
+    elif [[ "$cmd" =~ -m[[:space:]]+\'([^\']+)\' ]]; then
+        message="${BASH_REMATCH[1]}"
+    # Try to extract from --message flag with double quotes
+    elif [[ "$cmd" =~ --message[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+        message="${BASH_REMATCH[1]}"
+    # Try to extract from --message flag with single quotes
+    elif [[ "$cmd" =~ --message[[:space:]]*=[[:space:]]*\'([^\']+)\' ]]; then
+        message="${BASH_REMATCH[1]}"
+    # Try to extract from --message flag with double quotes (space separated)
+    elif [[ "$cmd" =~ --message[[:space:]]+\"([^\"]+)\" ]]; then
+        message="${BASH_REMATCH[1]}"
+    # Try to extract from --message flag with single quotes (space separated)
+    elif [[ "$cmd" =~ --message[[:space:]]+\'([^\']+)\' ]]; then
+        message="${BASH_REMATCH[1]}"
+    fi
+    
+    echo "$message"
+}
+
+# Function to validate conventional commit message
+validate_conventional_commit() {
+    local message="$1"
+    
+    # Check if message is empty
+    if [[ -z "$message" ]]; then
+        echo "Commit message cannot be empty"
+        return 1
+    fi
+    
+    # Conventional commit pattern:
+    # <type>[optional scope]: <description>
+    # Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+    # Optional scope in parentheses
+    # Optional ! for breaking changes
+    local pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_-]+\))?!?:[[:space:]]+.+'
+    
+    if [[ ! "$message" =~ $pattern ]]; then
+        echo "Invalid conventional commit format. Expected: <type>[optional scope]: <description>"
+        echo "Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+        echo "Examples:"
+        echo "  feat: add new feature"
+        echo "  fix(parser): resolve null pointer"
+        echo "  feat!: breaking change"
+        echo "  docs: update documentation"
+        return 1
+    fi
+    
+    # Extract the type and scope part for additional validation
+    local prefix="${message%%:*}"
+    
+    # Check for valid breaking change format (optional ! after type/scope)
+    if [[ "$prefix" =~ !$ ]]; then
+        # Valid breaking change format
+        :
+    fi
+    
+    return 0
+}
+
+# Extract commit message from command
+commit_message=$(extract_commit_message "$command")
+
+# Check if this is an editor-based commit (no -m or --message flag)
+if [[ -z "$commit_message" ]]; then
+    # Editor-based commit - provide context reminder instead of blocking
+    context="CONVENTIONAL_COMMITS: Remember to use conventional commit format: <type>[optional scope]: <description>. Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Use ! for breaking changes."
+    echo "{\"cancel\": false, \"contextModification\": \"$context\"}"
+    exit 0
+fi
+
+# Validate the commit message
+validation_output=$(validate_conventional_commit "$commit_message" 2>&1)
+validation_status=$?
+
+if [[ $validation_status -eq 0 ]]; then
+    # Valid conventional commit
+    echo '{"cancel": false}'
+else
+    # Invalid commit - block with error message
+    error_message="Conventional commit validation failed: $validation_output"
+    
+    # Use jq to create properly escaped JSON
+    jq -n --arg em "$error_message" '{"cancel": true, "errorMessage": $em}'
+fi
