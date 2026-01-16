@@ -1,0 +1,48 @@
+# Docker Compose configuration for MPI development environment
+version: '3.8'
+
+services:
+  mpi-dev:
+    build: .
+    image: hpc-mpi-dev:latest
+    container_name: hpc-mpi-development
+    volumes:
+      - ../../../examples:/workspace/examples
+      - ../../../projects:/workspace/projects
+      - ../../../scripts:/workspace/scripts
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    environment:
+      - OMPI_ALLOW_RUN_AS_ROOT=1
+      - OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+    # For GPU support, uncomment the following lines:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    
+  mpi-cluster:
+    build: .
+    image: hpc-mpi-dev:latest
+    container_name: hpc-mpi-cluster
+    command: >
+      bash -c "
+        echo 'Starting MPI cluster simulation...' &&
+        echo 'Node 1: mpi-cluster' &&
+        echo 'Node 2: mpi-cluster-2' &&
+        echo 'Node 3: mpi-cluster-3' &&
+        echo 'Use mpirun with hostfile for multi-container execution' &&
+        /bin/bash
+      "
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+# Note: For actual multi-node MPI, you would need to:
+# 1. Set up SSH between containers
+# 2. Create a hostfile with container IPs
+# 3. Use Docker network for container communication
