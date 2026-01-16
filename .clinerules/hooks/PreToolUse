@@ -117,7 +117,7 @@ commit_message=$(extract_commit_message "$command")
 if [[ -z "$commit_message" ]]; then
     # Editor-based commit - provide context reminder instead of blocking
     context="CONVENTIONAL_COMMITS: Remember to use conventional commit format: <type>[optional scope]: <description>. Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. Use ! for breaking changes."
-    echo "{\"cancel\": false, \"contextModification\": \"$context\"}"
+    jq -n --arg ctx "$context" '{"cancel": false, "contextModification": $ctx}'
     exit 0
 fi
 
